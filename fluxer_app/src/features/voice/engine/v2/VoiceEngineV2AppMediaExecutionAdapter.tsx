@@ -29,7 +29,7 @@ import {
 	transitionVoiceMicrophoneFailureLatchSnapshot,
 	type VoiceMicrophoneFailureLatchEvent,
 } from '@app/features/voice/engine/VoiceLocalAudioReconcilePolicy';
-import {isLocalSpeakingSuppressed} from '@app/features/voice/engine/VoiceLocalSpeakingGate';
+import {getLocalSpeakingOverride} from '@app/features/voice/engine/VoiceLocalSpeakingGate';
 import {
 	getRoomFromMediaEngine,
 	getVoiceConnectionContextFromMediaEngine,
@@ -125,7 +125,7 @@ import type {
 	TrackPublishOptions,
 	VideoCaptureOptions,
 } from 'livekit-client';
-import {Track, TrackEvent} from 'livekit-client';
+import {ConnectionState, Track, TrackEvent} from 'livekit-client';
 
 const logger = new Logger('VoiceEngineV2AppMediaExecutionAdapter');
 const CAMERA_PUBLISH_CODEC_CORRECTION_MAX = 1;
@@ -1686,13 +1686,17 @@ class VoiceEngineV2AppMediaExecutionAdapter extends Store {
 		return true;
 	}
 
-	private shouldSuppressLocalSpeaking(room: Room): boolean {
+	private readLocalSpeakingOverride(room: Room): boolean | null {
 		const publication = this.getMicrophonePublication(room);
-		return isLocalSpeakingSuppressed({
+		const track = publication?.track?.mediaStreamTrack;
+		return getLocalSpeakingOverride({
 			selfDeaf: LocalVoiceState.getSelfDeaf(),
-			effectiveSelfMute: getEffectiveSelfMuteForVoiceStatePayloadFromV2AudioControls(),
-			hasMicrophonePublication: Boolean(publication),
+			effectiveSelfMute:
+				this.getEffectiveAudioState().effectiveMute || getEffectiveSelfMuteForVoiceStatePayloadFromV2AudioControls(),
+			hasMicrophonePublication:
+				room.state === ConnectionState.Connected && track?.readyState === 'live' && track.enabled && !track.muted,
 			microphonePublicationMuted: publication?.isMuted ?? true,
+			pushToTalkActive: isPushToTalkActiveFromAppState() && Keybind.pushToTalkHeld,
 		});
 	}
 
@@ -1716,7 +1720,7 @@ class VoiceEngineV2AppMediaExecutionAdapter extends Store {
 
 	private syncLocalSpeaking(room: Room | null): void {
 		if (!room?.localParticipant) return;
-		const speaking = !this.shouldSuppressLocalSpeaking(room) && (this.localSpeakingMeter?.speaking ?? false);
+		const speaking = this.readLocalSpeakingOverride(room) ?? this.localSpeakingMeter?.speaking ?? false;
 		this.setLocalParticipantAudioLevelSpeaking(room, speaking);
 	}
 
@@ -1730,6 +1734,7 @@ class VoiceEngineV2AppMediaExecutionAdapter extends Store {
 				this.syncLocalSpeaking(room);
 				if (meter.speaking) noteLocalVoiceActivity(room.localParticipant, {force: true, speaking: true});
 			},
+			() => this.readLocalSpeakingOverride(room),
 		);
 		const reportRuntime = (): void => {
 			const processor = readVoiceInputProcessor(track);
