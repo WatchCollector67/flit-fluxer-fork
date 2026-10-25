@@ -1,3 +1,5 @@
+> **Fork modification:** This branch fixes the local voice activity ring so silent push-to-talk stays lit while transmission is enabled and quiet outgoing audio is not hidden by a second display threshold. See [the patch, limitations, and build/test instructions](./VOICE_INDICATOR.md). This is an unofficial client modification, not a server change.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./fluxer_static/marketing/branding/logo-white.svg">
