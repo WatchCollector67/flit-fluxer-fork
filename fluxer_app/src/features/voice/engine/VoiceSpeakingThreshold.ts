@@ -20,6 +20,23 @@ export interface SpeakingHysteresis {
 
 export const SILENT_SPEAKING_HYSTERESIS: SpeakingHysteresis = {speaking: false, aboveSinceMs: null, belowSinceMs: null};
 
+// The local ring indicates outgoing audio, not whether that audio qualifies as speech.
+export function advanceLocalSpeakingHysteresis(
+	state: SpeakingHysteresis,
+	rms: number,
+	nowMs: number,
+): SpeakingHysteresis {
+	if (Number.isFinite(rms) && rms > 0) {
+		return {speaking: true, aboveSinceMs: nowMs, belowSinceMs: null};
+	}
+	const belowSinceMs = state.belowSinceMs ?? nowMs;
+	return {
+		speaking: state.speaking && nowMs - belowSinceMs < SPEAKING_LOCAL_RELEASE_MS,
+		aboveSinceMs: null,
+		belowSinceMs,
+	};
+}
+
 function clampSlider(slider: number): number {
 	if (!Number.isFinite(slider)) return SLIDER_DEFAULT;
 	if (slider < 0) return 0;

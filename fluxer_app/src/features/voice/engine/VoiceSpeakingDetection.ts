@@ -3,7 +3,7 @@
 import {Logger} from '@app/features/platform/utils/AppLogger';
 import {getSharedVoiceAudioContext} from '@app/features/voice/engine/VoiceSharedAudioContext';
 import {
-	advanceSpeakingHysteresis,
+	advanceLocalSpeakingHysteresis,
 	getRemoteSpeakingThresholdRms,
 	SILENT_SPEAKING_HYSTERESIS,
 	type SpeakingHysteresis,
@@ -36,26 +36,27 @@ export function createSpeakingAnalyser(context: BaseAudioContext): AnalyserNode 
 	return analyser;
 }
 
-export function createSpeakingSamples(): Float32Array<ArrayBuffer> {
-	return new Float32Array(new ArrayBuffer(SPEAKING_ANALYSER_FFT_SIZE * Float32Array.BYTES_PER_ELEMENT));
+export function createSpeakingSamples(fftSize = SPEAKING_ANALYSER_FFT_SIZE): Float32Array<ArrayBuffer> {
+	return new Float32Array(new ArrayBuffer(fftSize * Float32Array.BYTES_PER_ELEMENT));
 }
 
 interface SpeakingMeterTap {
 	context: BaseAudioContext;
 	source: MediaStreamAudioSourceNode;
 	analyser: AnalyserNode;
+	samples: Float32Array<ArrayBuffer>;
 }
 
 export class VoiceSpeakingMeter {
 	private track: MediaStreamTrack | null = null;
 	private tap: SpeakingMeterTap | null = null;
 	private hysteresis = SILENT_SPEAKING_HYSTERESIS;
-	private readonly samples = createSpeakingSamples();
 	private readonly timer: ReturnType<typeof setInterval>;
 
 	constructor(
 		private readonly readTrack: () => MediaStreamTrack | null,
 		private readonly onChange: () => void,
+		private readonly readSpeakingOverride: () => boolean | null = () => null,
 	) {
 		this.timer = setInterval(() => this.tick(performance.now()), SPEAKING_ANALYSER_INTERVAL_MS);
 	}
@@ -65,15 +66,25 @@ export class VoiceSpeakingMeter {
 	}
 
 	tick(nowMs: number): void {
+		const override = this.readSpeakingOverride();
+		if (override !== null) {
+			this.closeTap();
+			this.update({...SILENT_SPEAKING_HYSTERESIS, speaking: override});
+			return;
+		}
 		const tap = this.syncTap();
 		if (!tap) {
 			this.update(SILENT_SPEAKING_HYSTERESIS);
 			return;
 		}
 		const running = tap.context.state === 'running';
-		if (running) tap.analyser.getFloatTimeDomainData(this.samples);
-		const rms = running ? computeTimeDomainRms(this.samples) : 0;
-		this.update(advanceSpeakingHysteresis(this.hysteresis, rms, readSpeakingThresholdRms(), nowMs));
+		if (!running) {
+			this.update(SILENT_SPEAKING_HYSTERESIS);
+			return;
+		}
+		tap.analyser.getFloatTimeDomainData(tap.samples);
+		const rms = computeTimeDomainRms(tap.samples);
+		this.update(advanceLocalSpeakingHysteresis(this.hysteresis, rms, nowMs));
 	}
 
 	dispose(): void {
@@ -84,8 +95,8 @@ export class VoiceSpeakingMeter {
 
 	private syncTap(): SpeakingMeterTap | null {
 		const candidate = this.readTrack();
-		const track = candidate?.readyState === 'live' ? candidate : null;
-		if (track === this.track) return this.tap;
+		const track = candidate?.readyState === 'live' && candidate.enabled && !candidate.muted ? candidate : null;
+		if (track === this.track && this.tap) return this.tap;
 		this.closeTap();
 		this.track = track;
 		this.hysteresis = {...SILENT_SPEAKING_HYSTERESIS, speaking: this.hysteresis.speaking};
@@ -94,8 +105,14 @@ export class VoiceSpeakingMeter {
 		try {
 			const source = context.createMediaStreamSource(new MediaStream([track]));
 			const analyser = createSpeakingAnalyser(context);
+			// Cover at least a complete polling interval instead of leaving gaps between snapshots.
+			const intervalSamples = (context.sampleRate * SPEAKING_ANALYSER_INTERVAL_MS) / 1000;
+			analyser.fftSize = Math.min(
+				32768,
+				2 ** Math.ceil(Math.log2(Math.max(SPEAKING_ANALYSER_FFT_SIZE, intervalSamples))),
+			);
 			source.connect(analyser);
-			this.tap = {context, source, analyser};
+			this.tap = {context, source, analyser, samples: createSpeakingSamples(analyser.fftSize)};
 		} catch (error) {
 			logger.warn('Failed to attach the local speaking analyser', {error});
 		}

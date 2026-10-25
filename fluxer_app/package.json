@@ -20,6 +20,7 @@
 		"build:renderer": "FLUXER_DESKTOP_RENDERER=true rspack build --mode production",
 		"codegen": "pnpm wasm:codegen && pnpm generate:colors && pnpm generate:message-layout && pnpm generate:theme-variables && pnpm generate:masks && pnpm generate:css-types && pnpm lingui:compile",
 		"dev": "TOKIO_WORKER_THREADS=4 RAYON_NUM_THREADS=4 ../tools/ci/run.sh app-dev-server",
+		"test:voice-speaking": "node --experimental-transform-types --test scripts/tests/VoiceSpeaking.test.mjs",
 		"typecheck": "pnpm wasm:codegen && pnpm generate:colors && pnpm generate:message-layout && pnpm generate:theme-variables && pnpm generate:masks && pnpm generate:css-types && pnpm lingui:compile && tsc --noEmit",
 		"typecheck:only": "tsc --noEmit",
 		"generate:colors": "pnpm tsx scripts/GenerateColorSystem.ts",

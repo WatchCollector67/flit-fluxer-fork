@@ -12,3 +12,10 @@ export function isLocalSpeakingSuppressed(input: LocalSpeakingSuppressionInput):
 		input.selfDeaf || input.effectiveSelfMute || !input.hasMicrophonePublication || input.microphonePublicationMuted
 	);
 }
+
+export function getLocalSpeakingOverride(
+	input: LocalSpeakingSuppressionInput & {pushToTalkActive: boolean},
+): boolean | null {
+	if (isLocalSpeakingSuppressed(input)) return false;
+	return input.pushToTalkActive ? true : null;
+}
